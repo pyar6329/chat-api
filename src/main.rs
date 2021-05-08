@@ -64,39 +64,25 @@ impl Chat for MyChat {
         let _: redis::RedisResult<()> = conn_pubsub.subscribe(channel_name).await;
         let mut stream = conn_pubsub.on_message();
         loop {
+            // let (mut tx, mut rx) = mpsc::channel(1);
             let (mut tx, mut rx) = mpsc::channel(4);
             // while let Some(msg) = stream.next().await {
             match stream.next().await {
                 Some(msg) => {
-                    // let payload: String = msg.get_payload().unwrap();
-                    // println!("channel '{}': {}", msg.get_channel_name(), payload);
-                    // let foo_msg = JoinChatRoomResponse {
-                    //     id: 1,
-                    //     message: payload,
-                    //     name: msg.get_channel_name().to_string(),
-                    //     date: Some(Timestamp::from(SystemTime::now())),
-                    // };
-                    // let foo_msg2 = JoinChatRoomResponse {
-                    //     id: 1,
-                    //     message: "aaaaaa".to_string(),
-                    //     name: msg.get_channel_name().to_string(),
-                    //     date: Some(Timestamp::from(SystemTime::now())),
-                    // };
-                    // TODO: sendがgRPCの方に返ってこないので調査する
-                    // NOTE: もしかしたらRedisのawaitの中でtokio::spawnするのかもしれない
-                    // let handle = tokio::spawn(async move {
-                    //     // let aaaa = tx.clone();
-                    //     tx.send(Ok(foo_msg)).await.unwrap();
-                    //     // match result {
-                    //     //     Ok(_) => println!("okkkk"),
-                    //     //     Err(_) => println!("errrrrr"),
-                    //     // }
-                    //     println!("send finished");
-                    // });
-                    // let _ = handle.await.unwrap(); // 接続中ずっとwaitする
                     tokio::spawn(async move {
-                        // let aaaa = tx.clone();
-                        for _ in 0..4 {
+                        // let payload: String = msg.get_payload().unwrap();
+                        // println!("channel '{}': {}", msg.get_channel_name(), payload);
+                        // tx.send(Ok(JoinChatRoomResponse {
+                        //     id: 1,
+                        //     message: payload,
+                        //     name: msg.get_channel_name().to_string(),
+                        //     date: Some(Timestamp::from(SystemTime::now())),
+                        // }))
+                        // .await
+                        // .unwrap();
+                        // 値無くなるまでloopがいいかも
+                        loop {
+                            // TODO: ここのloop処理なんとかする
                             let payload: String = msg.get_payload().unwrap();
                             println!("channel '{}': {}", msg.get_channel_name(), payload);
                             tx.send(Ok(JoinChatRoomResponse {
@@ -105,18 +91,13 @@ impl Chat for MyChat {
                                 name: msg.get_channel_name().to_string(),
                                 date: Some(Timestamp::from(SystemTime::now())),
                             }))
-                            .await
-                            .unwrap();
+                            .await;
+                            // .unwrap();
                         }
-                        // match result {
-                        //     Ok(_) => println!("okkkk"),
-                        //     Err(_) => println!("errrrrr"),
-                        // }
                         println!("send finished");
-                        // rx.close();
-                    })
-                    .await
-                    .unwrap();
+                    });
+                    // .await
+                    // .unwrap();
                     // let result_status = Status::new(Code::Ok, "");
                     // let kkk = Ok(foo_msg2);
                     // let kkk = Code::Ok(foo_msg);
@@ -130,9 +111,13 @@ impl Chat for MyChat {
                     // let mut streaming = requeston.into_inner();
                     // while let Some(point) = streaming.next().await {}
                     // return Ok(Response::new(ReceiverStream::new(rx)));
-                    // let _ = Response::new(ReceiverStream::new(rx));
-                    let _ = Response::new(rx);
-                    continue;
+                    // let receive_msg = rx.recv().await.unwrap();
+                    // println!("{:?}", receive_msg); // 結果を受け取る
+                    let foooo = Response::new(ReceiverStream::new(rx));
+                    // let foooo = Response::new(rx);
+                    return Ok(foooo); // TODO: 貯めて一気に送信だと、server pushの意味が無くなる。他の送信方法考える
+                                      // continue;
+                                      // continue;
                 }
                 None => {
                     // 返す値はstreamのtransaction
