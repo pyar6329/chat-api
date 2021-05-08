@@ -1,5 +1,5 @@
 [package]
-name = "dsf-ws"
+name = "dsf-chat"
 version = "0.1.0"
 authors = ["Tsukasa Arima <pyar6329@gmail.com>"]
 edition = "2018"
@@ -9,3 +9,4 @@ edition = "2018"
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 redis = { version = "0.20.0", features = ["tokio-comp"] }
+chat-proto = { git = "https://github.com/pyar6329/chat-proto.git", rev = "790d19fbfbb6852881afc9e9a5a54af7c0a368cf" }
