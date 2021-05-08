@@ -3,12 +3,13 @@ use chat_proto::chat::chat_server::{Chat, ChatServer};
 use chat_proto::chat::{JoinChatRoomResponse, SendChatMessageRequest, FILE_DESCRIPTOR_SET};
 use chat_proto::prost_types::{FileDescriptorProto, FileDescriptorSet, Timestamp};
 // use chat_proto::tonic::futures_core;
-use chat_proto::tonic::{transport::Server, Request, Response, Status};
+use chat_proto::tonic::{transport::Server, Code, Request, Response, Status};
 use chat_proto::tonic_reflection::server::Builder;
 use redis::{AsyncCommands, ControlFlow, PubSubCommands};
 use std::env;
 use std::sync::Arc;
 use std::time::SystemTime;
+use tokio::sync::mpsc::Sender;
 use tokio::sync::{mpsc, Mutex};
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
@@ -42,7 +43,10 @@ impl Chat for MyChat {
 
     type JoinRoomStream = ReceiverStream<Result<JoinChatRoomResponse, Status>>;
 
-    async fn join_room(&self, _: Request<()>) -> Result<Response<Self::JoinRoomStream>, Status> {
+    async fn join_room(
+        &self,
+        requeston: Request<()>,
+    ) -> Result<Response<Self::JoinRoomStream>, Status> {
         let msg = JoinChatRoomResponse {
             id: 1,
             message: "aaa".to_string(),
@@ -51,73 +55,94 @@ impl Chat for MyChat {
         };
         println!("aaaaa");
         let msg2 = msg.clone();
-        let (mut tx, rx) = mpsc::channel(4);
-        // let (tx2, rx2) = mpsc::channel(1);
+        // let (mut tx, rx) = mpsc::channel(4);
 
-        // let conn_clone = self.redis_conn.clone();
-        let conn_normal_clone = self.redis_conn_normal.clone();
         let conn_pubsub_clone = self.redis_conn_pubsub.clone();
         let channel_name = "foo".to_string();
-        let handle = tokio::spawn(async move {
-            // let mut conn = conn_clone.lock().await;
-            // let _ = fetch_an_string(conn).await;
-            // let _: redis::RedisResult<String> = conn.set("aaa", "bbb").await;
-            // let mut pub_sub = conn.into_pubsub();
-            // let _: redis::RedisResult<()> = pub_sub.subscribe(channel_name).await;
-            // let _: redis::RedisResult<()> = conn
-            //     .into_pubsub()
-            //     .subscribe(&[channel], |msg: Msg| {
-            //         let received: String = msg.get_payload().unwrap();
-            //         println!("{}", received);
-            //         return ControlFlow::Continue;
-            //     })
-            //     .unwrap();
-            // // ここで複数送りつける
-            // tx.send(Ok(msg)).await.unwrap();
-            // tx.send(Ok(msg2)).await.unwrap();
-            let mut conn_normal = conn_normal_clone.lock().await;
-            let mut conn_pubsub = conn_pubsub_clone.lock().await;
+        let mut conn_pubsub = conn_pubsub_clone.lock().await;
 
-            let _: redis::RedisResult<()> = conn_pubsub.subscribe(channel_name).await;
-            let mut stream = conn_pubsub.on_message();
-            while let Some(msg) = stream.next().await {
-                let payload: String = msg.get_payload().unwrap();
-                println!("channel '{}': {}", msg.get_channel_name(), payload);
-                let foo_msg = JoinChatRoomResponse {
-                    id: 1,
-                    message: payload,
-                    name: msg.get_channel_name().to_string(),
-                    date: Some(Timestamp::from(SystemTime::now())),
-                };
-                // TODO: sendがgRPCの方に返ってこないので調査する
-                // NOTE: もしかしたらRedisのawaitの中でtokio::spawnするのかもしれない
-                let result = tx.send(Ok(foo_msg.clone())).await;
-                let _ = tx.send(Ok(foo_msg.clone())).await;
-                match result {
-                    Ok(_) => println!("okkkk"),
-                    Err(_) => println!("errrrrr"),
+        let _: redis::RedisResult<()> = conn_pubsub.subscribe(channel_name).await;
+        let mut stream = conn_pubsub.on_message();
+        loop {
+            let (mut tx, mut rx) = mpsc::channel(4);
+            // while let Some(msg) = stream.next().await {
+            match stream.next().await {
+                Some(msg) => {
+                    // let payload: String = msg.get_payload().unwrap();
+                    // println!("channel '{}': {}", msg.get_channel_name(), payload);
+                    // let foo_msg = JoinChatRoomResponse {
+                    //     id: 1,
+                    //     message: payload,
+                    //     name: msg.get_channel_name().to_string(),
+                    //     date: Some(Timestamp::from(SystemTime::now())),
+                    // };
+                    // let foo_msg2 = JoinChatRoomResponse {
+                    //     id: 1,
+                    //     message: "aaaaaa".to_string(),
+                    //     name: msg.get_channel_name().to_string(),
+                    //     date: Some(Timestamp::from(SystemTime::now())),
+                    // };
+                    // TODO: sendがgRPCの方に返ってこないので調査する
+                    // NOTE: もしかしたらRedisのawaitの中でtokio::spawnするのかもしれない
+                    // let handle = tokio::spawn(async move {
+                    //     // let aaaa = tx.clone();
+                    //     tx.send(Ok(foo_msg)).await.unwrap();
+                    //     // match result {
+                    //     //     Ok(_) => println!("okkkk"),
+                    //     //     Err(_) => println!("errrrrr"),
+                    //     // }
+                    //     println!("send finished");
+                    // });
+                    // let _ = handle.await.unwrap(); // 接続中ずっとwaitする
+                    tokio::spawn(async move {
+                        // let aaaa = tx.clone();
+                        for _ in 0..4 {
+                            let payload: String = msg.get_payload().unwrap();
+                            println!("channel '{}': {}", msg.get_channel_name(), payload);
+                            tx.send(Ok(JoinChatRoomResponse {
+                                id: 1,
+                                message: payload,
+                                name: msg.get_channel_name().to_string(),
+                                date: Some(Timestamp::from(SystemTime::now())),
+                            }))
+                            .await
+                            .unwrap();
+                        }
+                        // match result {
+                        //     Ok(_) => println!("okkkk"),
+                        //     Err(_) => println!("errrrrr"),
+                        // }
+                        println!("send finished");
+                        // rx.close();
+                    })
+                    .await
+                    .unwrap();
+                    // let result_status = Status::new(Code::Ok, "");
+                    // let kkk = Ok(foo_msg2);
+                    // let kkk = Code::Ok(foo_msg);
+                    // let kkk = Err(result_status);
+                    // let nnn: Result<JoinChatRoomResponse, Status> = kkk;
+                    // let ggg = ReceiverStream::new(nnn);
+                    // ReceiverStream<Result<JoinChatRoomResponse, Status>>;
+                    // return Ok(Response::new(ggg));
+                    // return Ok(Response::new(ggg));
+                    // requeston.continue();
+                    // let mut streaming = requeston.into_inner();
+                    // while let Some(point) = streaming.next().await {}
+                    // return Ok(Response::new(ReceiverStream::new(rx)));
+                    // let _ = Response::new(ReceiverStream::new(rx));
+                    let _ = Response::new(rx);
+                    continue;
                 }
-                println!("send finished");
+                None => {
+                    // 返す値はstreamのtransaction
+                    return Ok(Response::new(ReceiverStream::new(rx)));
+                    // break;
+                }
             }
-            // TODO: ここが普通のconn
-            // let _: () = conn_normal
-            //     .subscribe(&[channel_name], |msg| {
-            //         let received: String = msg.get_payload().unwrap();
-            //         println!("{}", received);
-            //         let foo_msg = JoinChatRoomResponse {
-            //             id: 1,
-            //             message: received,
-            //             name: "bbb".to_string(),
-            //             date: Some(Timestamp::from(SystemTime::now())),
-            //         };
-            //         tx.send(Ok(foo_msg)).await; // awaitできない
-            //         return ControlFlow::Continue;
-            //     })
-            //     .unwrap();
-        });
-        let _ = handle.await.unwrap(); // 接続中ずっとwaitする
-                                       // 返す値はstreamのtransaction
-        Ok(Response::new(ReceiverStream::new(rx)))
+        }
+        // 返す値はstreamのtransaction
+        // Ok(Response::new(ReceiverStream::new(rx)))
     }
 }
 
