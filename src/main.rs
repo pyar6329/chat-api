@@ -2,11 +2,14 @@ extern crate redis;
 use chat_proto::chat::chat_server::{Chat, ChatServer};
 use chat_proto::chat::{JoinChatRoomResponse, SendChatMessageRequest, FILE_DESCRIPTOR_SET};
 use chat_proto::prost_types::{FileDescriptorProto, FileDescriptorSet, Timestamp};
+// use chat_proto::tonic::futures_core;
 use chat_proto::tonic::{transport::Server, Request, Response, Status};
 use chat_proto::tonic_reflection::server::Builder;
 use redis::AsyncCommands;
 use std::env;
 use std::time::SystemTime;
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::ReceiverStream;
 
 // #[derive(Debug, StructOpt)]
 // pub struct ServerOptions {
@@ -31,15 +34,25 @@ impl Chat for MyChat {
         Ok(Response::new(()))
     }
 
-    async fn join_room(&self, _: Request<()>) -> Result<Response<JoinChatRoomResponse>, Status> {
-        println!("aaaaa");
-        let response = JoinChatRoomResponse {
+    type JoinRoomStream = ReceiverStream<Result<JoinChatRoomResponse, Status>>;
+
+    async fn join_room(&self, _: Request<()>) -> Result<Response<Self::JoinRoomStream>, Status> {
+        let msg = JoinChatRoomResponse {
             id: 1,
             message: "aaa".to_string(),
             name: "bbb".to_string(),
             date: Some(Timestamp::from(SystemTime::now())),
         };
-        Ok(Response::new(response))
+        println!("aaaaa");
+        let msg2 = msg.clone();
+        let (tx, rx) = mpsc::channel(4);
+        tokio::spawn(async move {
+            // ここで複数送りつける
+            tx.send(Ok(msg)).await.unwrap();
+            tx.send(Ok(msg2)).await.unwrap();
+        });
+        // 返す値はstreamのtransaction
+        Ok(Response::new(ReceiverStream::new(rx)))
     }
 }
 

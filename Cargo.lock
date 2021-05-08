@@ -71,7 +71,7 @@ checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 [[package]]
 name = "chat-proto"
 version = "0.1.0"
-source = "git+https://github.com/pyar6329/chat-proto.git?rev=790d19fbfbb6852881afc9e9a5a54af7c0a368cf#790d19fbfbb6852881afc9e9a5a54af7c0a368cf"
+source = "git+https://github.com/pyar6329/chat-proto.git?rev=fa53495379b6e20a2ecf47d4c4a66777a85cc4b5#fa53495379b6e20a2ecf47d4c4a66777a85cc4b5"
 dependencies = [
  "prost",
  "prost-types",
@@ -100,6 +100,7 @@ dependencies = [
  "chat-proto",
  "redis",
  "tokio",
+ "tokio-stream",
 ]
 
 [[package]]
