@@ -7,8 +7,9 @@ use chat_proto::tonic::{transport::Server, Request, Response, Status};
 use chat_proto::tonic_reflection::server::Builder;
 use redis::AsyncCommands;
 use std::env;
+use std::sync::Arc;
 use std::time::SystemTime;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Mutex};
 use tokio_stream::wrappers::ReceiverStream;
 
 // #[derive(Debug, StructOpt)]
@@ -18,8 +19,10 @@ use tokio_stream::wrappers::ReceiverStream;
 //    pub server_listen_addr: String,
 // }
 
-#[derive(Default)]
-pub struct MyChat {}
+// #[derive(Default)]
+pub struct MyChat {
+    redis_conn: Arc<Mutex<redis::aio::Connection>>,
+}
 
 #[chat_proto::tonic::async_trait]
 impl Chat for MyChat {
@@ -46,7 +49,12 @@ impl Chat for MyChat {
         println!("aaaaa");
         let msg2 = msg.clone();
         let (tx, rx) = mpsc::channel(4);
+
+        let conn_clone = self.redis_conn.clone();
         tokio::spawn(async move {
+            let mut conn = conn_clone.lock().await;
+            // let _ = fetch_an_string(conn).await;
+            let _: redis::RedisResult<String> = conn.set("aaa", "bbb").await;
             // ここで複数送りつける
             tx.send(Ok(msg)).await.unwrap();
             tx.send(Ok(msg2)).await.unwrap();
@@ -58,8 +66,16 @@ impl Chat for MyChat {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // redisのconnection
+    let mut conn = connect().await?;
+    let mutex_conn = Arc::new(Mutex::new(conn));
+
+    // gRPCのserver
     let addr = "0.0.0.0:50051".parse().unwrap();
-    let chat = MyChat::default();
+    // let chat = MyChat::default();
+    let chat = MyChat {
+        redis_conn: mutex_conn,
+    };
 
     println!("ChatServer listening on {}", addr);
 
@@ -88,25 +104,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //     println!("Hello, world!");
 //     Ok(())
 // }
-//
+
 // async fn fetch_an_string(mut conn: redis::aio::Connection) -> redis::RedisResult<String> {
 //     let _ = conn.set("my_key", "jjjjj").await?;
 //     let result = conn.get("my_key").await;
 //     // conn.get("my_key").await
-//     return result
+//     return result;
 // }
-//
-// async fn connect() -> redis::RedisResult<redis::aio::Connection> {
-//     let redis_host_name =
-//         env::var("REDIS_HOSTNAME").expect("missing environment variable REDIS_HOSTNAME");
-//     let redis_password =
-//         env::var("REDIS_PASSWORD").expect("missing environment variable REDIS_PASSWORD");
-//     // redisのTLS接続はredissでOK
-//     // https://github.com/lettuce-io/lettuce-core/wiki/Redis-URI-and-connection-details
-//     let redis_conn_url = format!("redis://:{}@{}", redis_password, redis_host_name);
-//
-//     redis::Client::open(redis_conn_url)
-//         .expect("invalid connection URL")
-//         .get_async_connection()
-//         .await
-// }
+
+async fn fetch_an_string(
+    mut conn: tokio::sync::MutexGuard<'_, redis::aio::Connection>,
+) -> redis::RedisResult<String> {
+    let _ = conn.set("my_key", "jjjjj").await?;
+    let result = conn.get("my_key").await;
+    // conn.get("my_key").await
+    return result;
+}
+
+async fn connect() -> redis::RedisResult<redis::aio::Connection> {
+    let redis_host_name =
+        env::var("REDIS_HOSTNAME").expect("missing environment variable REDIS_HOSTNAME");
+    let redis_password =
+        env::var("REDIS_PASSWORD").expect("missing environment variable REDIS_PASSWORD");
+    // redisのTLS接続はredissでOK
+    // https://github.com/lettuce-io/lettuce-core/wiki/Redis-URI-and-connection-details
+    let redis_conn_url = format!("redis://:{}@{}", redis_password, redis_host_name);
+
+    redis::Client::open(redis_conn_url)
+        .expect("invalid connection URL")
+        .get_async_connection()
+        .await
+}
