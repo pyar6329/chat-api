@@ -1,0 +1,207 @@
+---
+name: CI
+on: [push]
+jobs:
+  test:
+    runs-on: ubuntu-20.04
+    env:
+      CACHE_VERSION: "0.0"
+      REDIS_VERSION: "6.2"
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        fetch-depth: 1
+
+    - name: Run Redis
+      run: |
+        docker run -it \
+          -d \
+          --rm \
+          --name "redis" \
+          -p "6379:6379" \
+          redis:"${REDIS_VERSION}"
+        for i in `seq 1 10`;
+        do
+          nc -z localhost 6379 && echo "Success" && exit 0
+          echo -n .
+          sleep 1
+        done
+        echo "Failed waiting for Redis" && exit 1
+
+    - name: Cache cargo
+      uses: actions/cache@v2
+      with:
+        path: |
+          ~/.cargo/registry/index
+          ~/.cargo/registry/cache
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ env.CACHE_VERSION }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-
+          ${{ runner.os }}-cargo-
+
+    - name: Setup Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+
+    - name: Run cargo check
+      uses: actions-rs/cargo@v1
+      with:
+        command: check
+
+    - name: Check format
+      uses: actions-rs/cargo@v1
+      with:
+        command: fmt
+        args: -- --check
+
+    # - name: Run cargo test
+    #   uses: actions-rs/cargo@v1
+    #   with:
+    #     command: test
+
+  release-tag:
+    needs: test
+    runs-on: ubuntu-20.04
+    # if: github.ref == 'refs/heads/main'
+    outputs:
+      tag: ${{ steps.release_tag.outputs.tag }}
+    steps:
+      - name: Get currentTime
+        id: release_tag
+        run: |
+          TAG=$(date +"%Y%m%d.%H%M%S")
+          echo ::set-output name=tag::${TAG}
+
+  release:
+    needs: release-tag
+    runs-on: ubuntu-20.04
+    # if: github.ref == 'refs/heads/main'
+    strategy:
+      matrix:
+        target: [x86_64-unknown-linux-musl]
+    env:
+      CACHE_VERSION: "0.0"
+ 
+    steps:
+      - uses: actions/checkout@main
+
+      - name: Install dependencies
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: |
+          sudo apt-get install -y musl-tools
+
+      - name: Cache cargo
+        uses: actions/cache@v2
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ env.CACHE_VERSION }}-${{ matrix.target }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ env.CACHE_VERSION }}
+            ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-
+            ${{ runner.os }}-cargo-
+
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        with:
+          toolchain: stable
+          profile: minimal
+          target: ${{ matrix.target }}
+
+      - name: Build release binary for Linux
+        uses: actions-rs/cargo@v1
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        with:
+          use-cross: true
+          command: build
+          args: --release --target ${{ matrix.target }}
+
+      - name: Compress using Zstandard
+        env:
+          BINARY_PATH: target/${{ matrix.target }}/release
+          TARGET: ${{ matrix.target }}
+        run: |
+          OS="Linux"
+          echo ::set-output name=os::${OS}
+          ARCH=${TARGET%%-*}
+          echo ::set-output name=arch::${ARCH}
+          mkdir dist
+          tar -I "pzstd -19" -cvf "dist/grpc_chat-${OS}-${ARCH}.tar.zst" -C "$BINARY_PATH" grpc_chat
+      
+      - name: Hand over release binary to upload
+        uses: actions/upload-artifact@v2
+        with:
+          name: dist
+          path: ./dist
+          retention-days: 1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v1
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v1
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & Push Docker image
+        uses: docker/build-push-action@v2
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        with:
+          context: .
+          file: .github/workflows/docker/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ needs.release-tag.outputs.tag }}
+            ghcr.io/${{ github.repository }}:latest
+          build-args: |
+            GITHUB_ACCESS_TOKEN=${{ secrets.GITHUB_TOKEN }}
+
+  upload:
+    needs: [release-tag, release]
+    runs-on: ubuntu-20.04
+    # if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          fetch-depth: 1
+
+      - name: Take over release binary from release-build
+        uses: actions/download-artifact@v2
+        with:
+          name: dist
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ needs.release-tag.outputs.tag }}
+          release_name: ${{ needs.release-tag.outputs.tag }}
+          body: |
+            ## Usage
+
+            ```bash
+            $ docker run -it -p "50051:50051" ghcr.io/pyar6329/chat-api
+            ```
+          draft: false
+          prerelease: false
+
+      - name: Upload Release Asset
+        env:
+          GITHUB_TOKEN: ${{ secrets.TOKEN_FOR_GITHUB }}
+          TAG: ${{ needs.release-tag.outputs.tag }}
+        run: |
+          CPU_CORES=$(grep -c processor /proc/cpuinfo)
+          find . -name "*.tar.zst" -type f -print | xargs -I {} -n 1 -P ${CPU_CORES} gh release upload ${TAG} {}
