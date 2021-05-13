@@ -1,5 +1,5 @@
 [package]
-name = "dsf-chat"
+name = "grpc_chat"
 version = "0.1.0"
 authors = ["Tsukasa Arima <pyar6329@gmail.com>"]
 edition = "2018"

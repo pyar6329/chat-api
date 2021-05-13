@@ -100,16 +100,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dsf-chat"
-version = "0.1.0"
-dependencies = [
- "chat-proto",
- "redis",
- "tokio",
- "tokio-stream",
-]
-
-[[package]]
 name = "dtoa"
 version = "0.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -244,6 +234,16 @@ dependencies = [
  "cfg-if",
  "libc",
  "wasi",
+]
+
+[[package]]
+name = "grpc_chat"
+version = "0.1.0"
+dependencies = [
+ "chat-proto",
+ "redis",
+ "tokio",
+ "tokio-stream",
 ]
 
 [[package]]
