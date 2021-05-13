@@ -199,6 +199,7 @@ jobs:
           release_name: ${{ needs.release-tag.outputs.tag }}
           body: |
             ## Usage
+            docker tag list: https://github.com/users/pyar6329/packages/container/package/chat-api
 
             ```bash
             $ docker run -it -p "50051:50051" -e "REDIS_HOSTNAME=localhost" -e "REDIS_PASSWORD=foobar" ghcr.io/pyar6329/chat-api:${{ needs.release-tag.outputs.tag }}
@@ -208,7 +209,7 @@ jobs:
 
       - name: Upload Release Asset
         env:
-          GITHUB_TOKEN: ${{ secrets.TOKEN_FOR_GITHUB }}
+          GITHUB_TOKEN: ${{ secrets.ACCESS_TOKEN_FOR_GITHUB }}
           TAG: ${{ needs.release-tag.outputs.tag }}
         run: |
           CPU_CORES=$(grep -c processor /proc/cpuinfo)

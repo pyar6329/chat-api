@@ -1,4 +1,6 @@
 FROM alpine:3.13
+LABEL org.opencontainers.image.source https://github.com/pyar6329/chat-api
+# ref: https://github.com/users/pyar6329/packages/container/package/chat-api
 
 WORKDIR /app
 
