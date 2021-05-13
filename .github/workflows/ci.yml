@@ -72,7 +72,7 @@ jobs:
   release-tag:
     needs: test
     runs-on: ubuntu-20.04
-    # if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main'
     outputs:
       tag: ${{ steps.release_tag.outputs.tag }}
     steps:
@@ -85,7 +85,7 @@ jobs:
   release:
     needs: release-tag
     runs-on: ubuntu-20.04
-    # if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main'
     strategy:
       matrix:
         target: [x86_64-unknown-linux-musl]
@@ -178,7 +178,7 @@ jobs:
   upload:
     needs: [release-tag, release]
     runs-on: ubuntu-20.04
-    # if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v2
         with:
