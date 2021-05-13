@@ -202,7 +202,18 @@ jobs:
             docker tag list: https://github.com/users/pyar6329/packages/container/package/chat-api
 
             ```bash
-            $ docker run -it -p "50051:50051" -e "REDIS_HOSTNAME=localhost" -e "REDIS_PASSWORD=foobar" ghcr.io/pyar6329/chat-api:${{ needs.release-tag.outputs.tag }}
+            $ docker run -it -p "50051:50051" \
+                -e "REDIS_HOSTNAME=localhost" \
+                -e "REDIS_PASSWORD=foobar" \
+                ghcr.io/pyar6329/chat-api:${{ needs.release-tag.outputs.tag }}
+            ```
+
+            or get curl
+
+            ```bash
+            $ curl -sLJO -H 'Accept: application/octet-stream' "https://$GITHUB_TOKEN@api.github.com/repos/pyar6329/chat-api/releases/assets/$( \
+                curl -sL https://$GITHUB_TOKEN@api.github.com/repos/pyar6329/chat-api/releases/tags/${{ needs.release-tag.outputs.tag }} \
+                | jq '.assets[] | select(.name | contains("Linux")) | .id')"
             ```
           draft: false
           prerelease: false
