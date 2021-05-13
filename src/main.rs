@@ -6,7 +6,11 @@ use chat_proto::prost_types::{FileDescriptorProto, FileDescriptorSet, Timestamp}
 use chat_proto::tonic::{transport::Server, Code, Request, Response, Status};
 use chat_proto::tonic_reflection::server::Builder;
 use redis::aio::Connection as RedisConnection;
+use redis::aio::ConnectionManager as RedisConnectionManager;
+use redis::aio::MultiplexedConnection as RedisMultiplexedConnection;
 use redis::aio::PubSub as RedisPubSub;
+// use redis::AsyncCommands;
+// use redis::Commands;
 use redis::IntoConnectionInfo as RedisConnectionInfo;
 use redis::RedisError;
 use redis::{AsyncCommands, ControlFlow, PubSubCommands};
@@ -27,11 +31,7 @@ use tokio_stream::StreamExt;
 // }
 
 // #[derive(Default)]
-pub struct MyChat {
-    redis_conn: Arc<Mutex<redis::aio::Connection>>,
-    redis_conn_pubsub: Arc<Mutex<redis::aio::PubSub>>,
-    redis_conn_normal: Arc<Mutex<redis::Connection>>,
-}
+pub struct MyChat {}
 
 #[chat_proto::tonic::async_trait]
 impl Chat for MyChat {
@@ -39,11 +39,44 @@ impl Chat for MyChat {
         &self,
         request: Request<SendChatMessageRequest>,
     ) -> Result<Response<()>, Status> {
-        println!("Got a request from {:?}", request.remote_addr());
+        // println!("Got a request from {:?}", request.remote_addr());
+        // let a = format!("Hello {}!", request.into_inner().message);
+        // println!("{}", a);
+        let request_inner = request.into_inner();
 
-        let a = format!("Hello {}!", request.into_inner().message);
-        println!("{}", a);
-        Ok(Response::new(()))
+        let (tx, mut rx) = mpsc::channel(4);
+        let channel_name = "foo".to_string();
+
+        tokio::spawn(async move {
+            // 1 request毎にredis pub/subのconnectionを貼る
+            let conn = &mut connect().await.unwrap();
+
+            // let mut bbb = conn.clone();
+            let result: Result<(), RedisError> =
+                conn.publish(channel_name, request_inner.message).await;
+            let response_result = result.map_or_else(
+                |fail| Status::aborted(fail.to_string()),
+                |_| Status::ok("succeed"),
+            );
+            if let Err(_) = tx.send(response_result).await {
+                println!("send was failed.");
+            }
+            println!("send finished");
+        });
+        // 返す値はstreamのtransaction
+        // Ok(Response::new(ReceiverStream::new(rx)))
+        // Ok(Response::new(()))
+        match rx.recv().await {
+            Some(status) if status.code() == Code::Ok => Ok(Response::new(())),
+            Some(_) => {
+                println!("redis publish failed");
+                Err(Status::aborted("something worng."))
+            }
+            None => {
+                println!("tx send failed");
+                Err(Status::aborted("something worng."))
+            }
+        }
     }
 
     type JoinRoomStream = ReceiverStream<Result<JoinChatRoomResponse, Status>>;
@@ -63,7 +96,7 @@ impl Chat for MyChat {
                 println!("channel '{}': {}", msg.get_channel_name(), payload);
                 let send_msg = Ok(JoinChatRoomResponse {
                     id: 1,
-                    message: payload,
+                    message: payload, // TODO: ここのpayloadをjsonで管理する
                     name: msg.get_channel_name().to_string(),
                     date: Some(Timestamp::from(SystemTime::now())),
                 });
@@ -83,22 +116,18 @@ impl Chat for MyChat {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // redisのconnection
-    let mut conn = connect().await?;
-    let mutex_conn = Arc::new(Mutex::new(conn));
-    let mut conn_normal = connect_normal().unwrap();
-    let mutex_conn_normal = Arc::new(Mutex::new(conn_normal));
-
-    let mut conn_pubsub = connect().await?;
-    let mutex_conn_pubsub = Arc::new(Mutex::new(conn_pubsub.into_pubsub()));
+    // let mut conn = connect().await?;
+    // let mutex_conn = Arc::new(Mutex::new(conn));
+    // let mut conn_normal = connect_normal().unwrap();
+    // let mutex_conn_normal = Arc::new(Mutex::new(conn_normal));
+    //
+    // let mut conn_pubsub = connect().await?;
+    // let mutex_conn_pubsub = Arc::new(Mutex::new(conn_pubsub.into_pubsub()));
 
     // gRPCのserver
     let addr = "0.0.0.0:50051".parse().unwrap();
     // let chat = MyChat::default();
-    let chat = MyChat {
-        redis_conn: mutex_conn,
-        redis_conn_normal: mutex_conn_normal,
-        redis_conn_pubsub: mutex_conn_pubsub,
-    };
+    let chat = MyChat {};
 
     println!("ChatServer listening on {}", addr);
 
@@ -144,7 +173,10 @@ async fn fetch_an_string(
     return result;
 }
 
-async fn connect() -> redis::RedisResult<redis::aio::Connection> {
+// connection using ConnectionManager
+async fn connect() -> Result<RedisConnectionManager, RedisError> {
+    // async fn connect() -> Result<RedisMultiplexedConnection, RedisError> {
+    // async fn connect() -> Result<RedisConnection, RedisError> {
     let redis_host_name =
         env::var("REDIS_HOSTNAME").expect("missing environment variable REDIS_HOSTNAME");
     let redis_password =
@@ -153,10 +185,13 @@ async fn connect() -> redis::RedisResult<redis::aio::Connection> {
     // https://github.com/lettuce-io/lettuce-core/wiki/Redis-URI-and-connection-details
     let redis_conn_url = format!("redis://:{}@{}", redis_password, redis_host_name);
 
-    redis::Client::open(redis_conn_url)
-        .expect("invalid connection URL")
-        .get_async_connection()
-        .await
+    let client = redis::Client::open(redis_conn_url)?;
+    // let conn = client.get_async_connection().await;
+    // let conn = client.get_multiplexed_async_connection().await;
+    // let connection_manager = client.get_tokio_connection_manager().await.unwrap();
+    let conn = client.get_tokio_connection_manager().await;
+    // let conn = RedisConnectionManager::new(client).await;
+    conn
 }
 
 async fn connect_pubsub() -> Result<RedisPubSub, RedisError> {
@@ -199,11 +234,11 @@ async fn connect_pubsub() -> Result<RedisPubSub, RedisError> {
 
 // #[derive(Clone)]
 // pub struct ConnectionPool {
-//     conn: RedisConnection,
+//     conn: &mut &'static RedisMultiplexedConnection,
 // }
 //
 // impl ConnectionPool {
-//     fn new(conn: ConnectionManager) -> ConnectionPool {
+//     fn new(conn: &mut &'static RedisMultiplexedConnection) -> ConnectionPool {
 //         ConnectionPool { conn }
 //     }
 //
@@ -212,21 +247,10 @@ async fn connect_pubsub() -> Result<RedisPubSub, RedisError> {
 //     }
 //
 //     pub async fn set(&mut self, key: &[u8], value: &[u8]) -> Result<(), RedisError> {
-//         self.conn.as_pubsub
-//         // self.conn.subscribe("foo".to_string()).await
+//         self.conn.set(key, value).await
+//     }
+//
+//     pub async fn publish(&mut self, channel: &[u8], message: &[u8]) -> Result<(), RedisError> {
+//         self.conn.publish(channel, message).await
 //     }
 // }
-
-fn connect_normal() -> redis::RedisResult<redis::Connection> {
-    let redis_host_name =
-        env::var("REDIS_HOSTNAME").expect("missing environment variable REDIS_HOSTNAME");
-    let redis_password =
-        env::var("REDIS_PASSWORD").expect("missing environment variable REDIS_PASSWORD");
-    // redisのTLS接続はredissでOK
-    // https://github.com/lettuce-io/lettuce-core/wiki/Redis-URI-and-connection-details
-    let redis_conn_url = format!("redis://:{}@{}", redis_password, redis_host_name);
-
-    redis::Client::open(redis_conn_url)
-        .expect("invalid connection URL")
-        .get_connection()
-}

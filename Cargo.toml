@@ -9,5 +9,5 @@ edition = "2018"
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1.5"
-redis = { version = "0.20.0", features = ["tokio-comp"] }
+redis = { version = "0.20.0", features = ["tokio-comp", "connection-manager"] }
 chat-proto = { git = "https://github.com/pyar6329/chat-proto.git", rev = "fa53495379b6e20a2ecf47d4c4a66777a85cc4b5" }
