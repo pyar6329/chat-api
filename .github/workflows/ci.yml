@@ -104,8 +104,8 @@ jobs:
         env:
           ACCESS_TOKEN_FOR_GITHUB: ${{ secrets.ACCESS_TOKEN_FOR_GITHUB }}
         run: |
-          git config --global credential.helper store && \
-          echo "https://${ACCESS_TOKEN_FOR_GITHUB}:@github.com" > ~/.git-credentials && \
+          git config --global credential.helper store
+          echo "https://${ACCESS_TOKEN_FOR_GITHUB}:@github.com" > ~/.git-credentials
 
       - name: Cache cargo
         uses: actions/cache@v2
@@ -207,7 +207,7 @@ jobs:
             ## Usage
 
             ```bash
-            $ docker run -it -p "50051:50051" ghcr.io/pyar6329/chat-api
+            $ docker run -it -p "50051:50051" ghcr.io/pyar6329/chat-api:${{ needs.release-tag.outputs.tag }}
             ```
           draft: false
           prerelease: false
