@@ -32,8 +32,8 @@ jobs:
       env:
         ACCESS_TOKEN_FOR_GITHUB: ${{ secrets.ACCESS_TOKEN_FOR_GITHUB }}
       run: |
-        git config --global credential.helper store && \
-        echo "https://${ACCESS_TOKEN_FOR_GITHUB}:@github.com" > ~/.git-credentials && \
+        git config --global credential.helper store
+        echo "https://${ACCESS_TOKEN_FOR_GITHUB}:@github.com" > ~/.git-credentials
 
     - name: Cache cargo
       uses: actions/cache@v2
