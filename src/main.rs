@@ -140,7 +140,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Server::builder()
         .add_service(reflection)
         .add_service(ChatServer::new(chat))
-        .serve(addr)
+        .serve_with_shutdown(addr, async {
+            tokio::signal::ctrl_c()
+                .await
+                .expect("failed to listen to interrupt signal");
+        })
         .await?;
     Ok(())
 }
